@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <title>Playlist Cleaner</title>
+</head>
+
+<body>
+  <div id="PlaylistCleanerPage" data-role="page" class="page type-interior pluginConfigurationPage"
+    data-require="emby-button,emby-checkbox,emby-select,emby-input">
+    <div data-role="content">
+      <div class="content-primary">
+        <h2>Playlist Cleaner</h2>
+        <div id="AdminOnlyMessage" class="notice" style="display:none">Administrator permissions are required to
+          configure or run this plugin.</div>
+        <form id="CleanerConfigForm">
+          <div class="selectContainer">
+            <label class="selectLabel" for="SelectedPlaylistId">Selected playlist</label>
+            <select is="emby-select" id="SelectedPlaylistId" name="SelectedPlaylistId"
+              class="emby-select-withcolor emby-select">
+              <option value="">No playlist selected</option>
+            </select>
+          </div>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label"><input id="AutomaticCleanupEnabled" type="checkbox"
+                is="emby-checkbox"><span>Enable automatic cleanup</span></label>
+          </div>
+          <div class="inputContainer">
+            <label class="inputLabel inputLabelUnfocused" for="ExecutionTime">Daily execution time</label>
+            <input id="ExecutionTime" type="time" is="emby-input" value="06:00">
+          </div>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label"><input id="MarkEpisodesWatched" type="checkbox"
+                is="emby-checkbox"><span>Mark episodes watched</span></label>
+          </div>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label"><input id="ClearPlaybackProgress" type="checkbox"
+                is="emby-checkbox"><span>Clear playback progress</span></label>
+          </div>
+          <div class="fieldDescription">Only direct TV episode entries in the selected playlist are processed. Other
+            media types are ignored.</div>
+          <div class="flex">
+            <button is="emby-button" type="submit" class="raised button-submit emby-button"><span>Save</span></button>
+            <button is="emby-button" id="ExecuteNowButton" type="button" class="raised emby-button"><span>Execute
+                now</span></button>
+          </div>
+        </form>
+        <h3>Last execution</h3>
+        <div id="ExecutionDetails" class="fieldDescription">Loading...</div>
+        <div id="ExecutionMessage" class="fieldDescription" role="status" aria-live="polite"></div>
+        <div class="fieldDescription">Plugin version: <span id="PluginVersion">1.0.0</span></div>
+      </div>
+    </div>
+    <script type="text/javascript">
+      const PlaylistCleaner = {
+        pluginId: 'c5c6e30f-82e4-4c0c-84aa-60c574da52cf',
+        taskName: 'Playlist cleanup'
+      };
+
+      function requestApi(path, method, data) {
+        const options = {
+          type: method || 'GET',
+          url: ApiClient.getUrl(path),
+          contentType: 'application/json'
+        };
+        if (data !== undefined) {
+          options.data = JSON.stringify(data);
+        }
+        if (!method || method === 'GET') {
+          options.dataType = 'json';
+        }
+        return ApiClient.ajax(options);
+      }
+
+      function formatDate(value) {
+        return value ? new Date(value).toLocaleString() : 'Never';
+      }
+
+      function renderStatus(config) {
+        document.querySelector('#ExecutionDetails').textContent =
+          'Status: ' + config.LastExecutionStatus +
+          ' | Last successful: ' + formatDate(config.LastSuccessfulExecutionUtc) +
+          ' | Users: ' + config.LastUsersProcessed +
+          ' | Episodes processed (user/item pairs): ' + config.LastEpisodesProcessed +
+          ' | Unique episodes: ' + config.LastUniqueEpisodesFound +
+          ' | Errors: ' + config.LastErrors;
+      }
+
+      async function loadPlaylists(selectedId, selectedName) {
+        const response = await requestApi('Playlists');
+        const playlists = Array.isArray(response) ? response : (response.Items || []);
+        const selector = document.querySelector('#SelectedPlaylistId');
+        selector.replaceChildren(new Option('No playlist selected', ''));
+        playlists.sort((left, right) => (left.Name || '').localeCompare(right.Name || ''));
+        playlists.forEach(playlist => selector.add(new Option(playlist.Name, playlist.Id)));
+        if (selectedId && !playlists.some(playlist => playlist.Id.toLowerCase() === selectedId.toLowerCase())) {
+          selector.add(new Option((selectedName || 'Unavailable playlist') + ' (missing)', selectedId));
+        }
+        selector.value = selectedId || '';
+      }
+
+      async function findTask() {
+        const response = await requestApi('ScheduledTasks');
+        const tasks = Array.isArray(response) ? response : (response.Items || []);
+        return tasks.find(task => task.Name === PlaylistCleaner.taskName);
+      }
+
+      async function updateTaskTrigger(config) {
+        const task = await findTask();
+        if (!task) {
+          throw new Error('The scheduled cleanup task is not registered yet. Restart Jellyfin and try again.');
+        }
+        let triggers = [];
+        if (config.AutomaticCleanupEnabled) {
+          const parts = (config.ExecutionTime || '06:00').split(':').map(Number);
+          const ticks = ((parts[0] * 60) + parts[1]) * 60 * 10000000;
+          triggers = [{ Type: 'DailyTrigger', TimeOfDayTicks: ticks }];
+        }
+        await requestApi('ScheduledTasks/' + encodeURIComponent(task.Id) + '/Triggers', 'POST', triggers);
+      }
+
+      document.querySelector('#PlaylistCleanerPage').addEventListener('pageshow', async () => {
+        try {
+          const user = await ApiClient.getCurrentUser();
+          if (!user.Policy || !user.Policy.IsAdministrator) {
+            document.querySelector('#AdminOnlyMessage').style.display = 'block';
+            document.querySelector('#CleanerConfigForm').style.display = 'none';
+            return;
+          }
+
+          const config = await ApiClient.getPluginConfiguration(PlaylistCleaner.pluginId);
+          document.querySelector('#AutomaticCleanupEnabled').checked = config.AutomaticCleanupEnabled;
+          document.querySelector('#ExecutionTime').value = config.ExecutionTime || '06:00';
+          document.querySelector('#MarkEpisodesWatched').checked = config.MarkEpisodesWatched;
+          document.querySelector('#ClearPlaybackProgress').checked = config.ClearPlaybackProgress;
+          renderStatus(config);
+          await loadPlaylists(config.SelectedPlaylistId, config.SelectedPlaylistName);
+        } catch (error) {
+          document.querySelector('#ExecutionMessage').textContent = 'Unable to load settings: ' + error.message;
+        }
+      });
+
+      document.querySelector('#CleanerConfigForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        Dashboard.showLoadingMsg();
+        try {
+          const config = await ApiClient.getPluginConfiguration(PlaylistCleaner.pluginId);
+          const playlistSelector = document.querySelector('#SelectedPlaylistId');
+          config.SelectedPlaylistId = playlistSelector.value || null;
+          config.SelectedPlaylistName = playlistSelector.selectedOptions[0]?.textContent || '';
+          config.AutomaticCleanupEnabled = document.querySelector('#AutomaticCleanupEnabled').checked;
+          config.ExecutionTime = document.querySelector('#ExecutionTime').value || '06:00';
+          config.MarkEpisodesWatched = document.querySelector('#MarkEpisodesWatched').checked;
+          config.ClearPlaybackProgress = document.querySelector('#ClearPlaybackProgress').checked;
+          const result = await ApiClient.updatePluginConfiguration(PlaylistCleaner.pluginId, config);
+          await updateTaskTrigger(config);
+          Dashboard.processPluginConfigurationUpdateResult(result);
+          document.querySelector('#ExecutionMessage').textContent = 'Settings saved.';
+        } catch (error) {
+          document.querySelector('#ExecutionMessage').textContent = 'Unable to save settings: ' + error.message;
+        } finally {
+          Dashboard.hideLoadingMsg();
+        }
+      });
+
+      document.querySelector('#ExecuteNowButton').addEventListener('click', async () => {
+        const button = document.querySelector('#ExecuteNowButton');
+        button.disabled = true;
+        document.querySelector('#ExecutionMessage').textContent = 'Starting cleanup...';
+        try {
+          const task = await findTask();
+          if (!task) {
+            throw new Error('The scheduled cleanup task is not registered yet. Restart Jellyfin and try again.');
+          }
+          await requestApi('ScheduledTasks/Running/' + encodeURIComponent(task.Id), 'POST');
+          document.querySelector('#ExecutionMessage').textContent = 'Cleanup started. This status will refresh automatically.';
+          const poll = async () => {
+            const config = await ApiClient.getPluginConfiguration(PlaylistCleaner.pluginId);
+            renderStatus(config);
+            if (config.LastExecutionStatus === 'Running') {
+              window.setTimeout(poll, 1500);
+            } else {
+              document.querySelector('#ExecutionMessage').textContent = 'Cleanup finished: ' + config.LastExecutionStatus + '.';
+              button.disabled = false;
+            }
+          };
+          window.setTimeout(poll, 1000);
+        } catch (error) {
+          document.querySelector('#ExecutionMessage').textContent = 'Unable to start cleanup: ' + error.message;
+          button.disabled = false;
+        }
+      });
+    </script>
+  </div>
+</body>
+
+</html>

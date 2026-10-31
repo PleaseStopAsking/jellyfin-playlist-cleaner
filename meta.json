@@ -1,0 +1,16 @@
+{
+  "category": "General",
+  "guid": "c5c6e30f-82e4-4c0c-84aa-60c574da52cf",
+  "name": "Playlist Cleaner",
+  "description": "Marks TV episodes in a selected playlist as watched and clears per-user resume positions.",
+  "owner": "Playlist Cleaner maintainers",
+  "overview": "Clean up Continue Watching and Next Up for a selected playlist.",
+  "version": "{version}",
+  "targetAbi": "12.4.0.0",
+  "timestamp": "{timestamp}",
+  "status": "Active",
+  "autoUpdate": true,
+  "assemblies": [
+    "Jellyfin.Plugin.PlaylistCleaner.dll"
+  ]
+}

@@ -1,0 +1,69 @@
+---
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - '[0-9]+.*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set release version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          IFS='.' read -r -a version_parts <<< "$version"
+          while [[ "${#version_parts[@]}" -lt 4 ]]; do
+            version_parts+=(0)
+          done
+          version=$(IFS='.'; echo "${version_parts[*]}")
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+
+      - name: Publish plugin
+        run: dotnet publish Jellyfin.Plugin.PlaylistCleaner.csproj --configuration Release --output publish -p:Version="${VERSION}"
+
+      - name: Package plugin
+        id: package
+        run: |
+          package="PlaylistCleaner_${VERSION}.zip"
+          (cd publish && zip -qr "../${package}" .)
+          echo "filename=${package}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE: ${{ steps.package.outputs.filename }}
+        run: |
+          mkdir -p /tmp/previous-manifest
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern manifest.json --dir /tmp/previous-manifest || true
+          python3 scripts/create_manifest.py \
+            --metadata manifest.json \
+            --previous-manifest /tmp/previous-manifest/manifest.json \
+            --package "$PACKAGE" \
+            --version "$VERSION" \
+            --source-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${PACKAGE}" \
+            --changelog-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}" \
+            --output manifest.json
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            ${{ steps.package.outputs.filename }}
+            manifest.json
+          generate_release_notes: true
