@@ -146,19 +146,20 @@ public sealed class PlaylistCleanupTask : IScheduledTask
                 return;
             }
 
-            var mediaItems = playlist.GetManageableItems()
+            var mediaItemIds = playlist.GetManageableItems()
                 .Select(entry => entry.Item2)
                 .Where(item => item is Episode or Movie)
-                .DistinctBy(item => item.Id)
+                .Select(item => item.Id)
+                .Distinct()
                 .ToArray();
 
-            uniqueItemCount = mediaItems.Length;
+            uniqueItemCount = mediaItemIds.Length;
             var users = usersWithAccess.ToArray();
 
             _logger.LogInformation("Playlist: {PlaylistName}", playlist.Name);
-            _logger.LogInformation("Found {ItemCount} unique TV episodes and movies and {UserCount} users with playlist access.", mediaItems.Length, users.Length);
+            _logger.LogInformation("Found {ItemCount} unique TV episodes and movies and {UserCount} users with playlist access.", mediaItemIds.Length, users.Length);
 
-            var totalOperations = Math.Max(1, mediaItems.Length * users.Length);
+            var totalOperations = Math.Max(1, mediaItemIds.Length * users.Length);
             var completedOperations = 0;
 
             foreach (var user in users)
@@ -169,12 +170,12 @@ public sealed class PlaylistCleanupTask : IScheduledTask
                 {
                     _logger.LogInformation("Processing user: {UserName}", user.Username);
 
-                    foreach (var item in mediaItems)
+                    foreach (var itemId in mediaItemIds)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         try
                         {
-                            var accessibleItem = _libraryManager.GetItemById<BaseItem>(item.Id, user);
+                            var accessibleItem = _libraryManager.GetItemById<BaseItem>(itemId, user);
                             if (accessibleItem is not null)
                             {
                                 ProcessItem(user, accessibleItem, configuration, cancellationToken);
@@ -188,7 +189,7 @@ public sealed class PlaylistCleanupTask : IScheduledTask
                         catch (Exception exception)
                         {
                             errors++;
-                            _logger.LogError(exception, "Failed to update media item {ItemId} ({ItemName}) for user {UserName}.", item.Id, item.Name, user.Username);
+                            _logger.LogError(exception, "Failed to update media item {ItemId} for user {UserName}.", itemId, user.Username);
                         }
 
                         completedOperations++;
