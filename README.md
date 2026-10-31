@@ -38,13 +38,13 @@ For those who use a playlist to fall asleep to their favorite shows, you know th
    | **Windows** | `%ProgramData%\Jellyfin\Server\plugins\PlaylistCleaner\` |
    | **macOS** | `~/.local/share/jellyfin/plugins/PlaylistCleaner/` |
 
-   The target folder should contain:
-   ```text
-   PlaylistCleaner/
-  ├── Jellyfin.Plugin.PlaylistCleaner.dll
-   ├── PlaylistCleaner.pdb
-   └── meta.json
-   ```
+  The target folder should contain:
+  ```text
+    PlaylistCleaner/
+    ├── Jellyfin.Plugin.PlaylistCleaner.dll
+    ├── PlaylistCleaner.pdb
+    └── meta.json
+  ```
 
 4. **Restart** your Jellyfin server.
 
