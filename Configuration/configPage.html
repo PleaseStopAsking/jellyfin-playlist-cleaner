@@ -32,14 +32,15 @@
           </div>
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label"><input id="MarkEpisodesWatched" type="checkbox"
-                is="emby-checkbox"><span>Mark episodes watched</span></label>
+                is="emby-checkbox"><span>Mark episodes and movies watched</span></label>
+            <div class="fieldDescription">The plugin will mark affected episodes and movies as watched if enabled.</div>
           </div>
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label"><input id="ClearPlaybackProgress" type="checkbox"
                 is="emby-checkbox"><span>Clear playback progress</span></label>
+            <div class="fieldDescription">Reset each playlist episode’s or movie’s resume position to zero without
+              changing its watched status.</div>
           </div>
-          <div class="fieldDescription">Only direct TV episode entries in the selected playlist are processed. Other
-            media types are ignored.</div>
           <div class="flex">
             <button is="emby-button" type="submit" class="raised button-submit emby-button"><span>Save</span></button>
             <button is="emby-button" id="ExecuteNowButton" type="button" class="raised emby-button"><span>Execute
@@ -82,18 +83,25 @@
           'Status: ' + config.LastExecutionStatus +
           ' | Last successful: ' + formatDate(config.LastSuccessfulExecutionUtc) +
           ' | Users: ' + config.LastUsersProcessed +
-          ' | Episodes processed (user/item pairs): ' + config.LastEpisodesProcessed +
-          ' | Unique episodes: ' + config.LastUniqueEpisodesFound +
+          ' | Media items processed (user/item pairs): ' + config.LastEpisodesProcessed +
+          ' | Unique media items: ' + config.LastUniqueEpisodesFound +
           ' | Errors: ' + config.LastErrors;
       }
 
       async function loadPlaylists(selectedId, selectedName) {
-        const response = await requestApi('Playlists');
-        const playlists = Array.isArray(response) ? response : (response.Items || []);
+        const userId = ApiClient.getCurrentUserId();
+        const query = 'Items?includeItemTypes=Playlist&recursive=true&enableUserData=false' +
+          (userId ? '&userId=' + encodeURIComponent(userId) : '');
+        const response = await requestApi(query);
+        const playlists = Array.isArray(response) ? response : (response.Items || response.items || []);
         const selector = document.querySelector('#SelectedPlaylistId');
         selector.replaceChildren(new Option('No playlist selected', ''));
         playlists.sort((left, right) => (left.Name || '').localeCompare(right.Name || ''));
         playlists.forEach(playlist => selector.add(new Option(playlist.Name, playlist.Id)));
+        if (playlists.length === 0) {
+          selector.replaceChildren(new Option('No accessible playlists found', ''));
+          return;
+        }
         if (selectedId && !playlists.some(playlist => playlist.Id.toLowerCase() === selectedId.toLowerCase())) {
           selector.add(new Option((selectedName || 'Unavailable playlist') + ' (missing)', selectedId));
         }

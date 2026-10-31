@@ -3,7 +3,7 @@
 
 # Jellyfin Playlist Cleaner
 
-A Jellyfin plugin designed to mark TV episodes from a given playlist as watched and clears each user's resume position without changing shared media metadata.
+A Jellyfin plugin that marks TV episodes and movies from a selected playlist as watched and clears each user's resume position without changing shared media metadata.
 
 For those who use a playlist to fall asleep to their favorite shows, you know the frustration of having to manually mark episodes as watched and clear resume positions the next day. This plugin automates that process, ensuring a seamless viewing experience.
 
@@ -41,7 +41,7 @@ For those who use a playlist to fall asleep to their favorite shows, you know th
    The target folder should contain:
    ```text
    PlaylistCleaner/
-   ├── PlaylistCleaner.dll
+  ├── Jellyfin.Plugin.PlaylistCleaner.dll
    ├── PlaylistCleaner.pdb
    └── meta.json
    ```
@@ -65,9 +65,9 @@ Configure the plugin via **Dashboard** > **Plugins** > **Playlist Cleaner**:
   - `Daily at 06:00` *(default)*: The plugin will run the automatic cleanup task daily at 06:00 server-local time.
   - `Custom`: Allows you to configure a custom schedule via Jellyfin's Scheduled Tasks dashboard.
 
-- **Mark episodes watched**:
-  - `Yes` *(default)*: The plugin will mark affected episodes as watched.
-  - `No`: Episodes will not be marked as watched.
+- **Mark episodes and movies watched**:
+  - `Yes` *(default)*: The plugin will mark affected episodes and movies as watched.
+  - `No`: Items will not be marked as watched.
 
 - **Clear playback progress**:
   - `Yes` *(default)*: The plugin will clear playback progress for the affected items.
@@ -78,5 +78,5 @@ Configure the plugin via **Dashboard** > **Plugins** > **Playlist Cleaner**:
 
 - The plugin page includes an administrator-only **Execute now** action and displays the last result, timestamp, user/item counts, errors, and plugin version.
 - The task checks each Jellyfin user's accessible playlists and only processes users who can access the selected playlist.
-- Only direct playlist entries resolved as TV `Episode` items are processed. Other entry types are ignored and duplicate episode IDs are processed once.
+- Only direct playlist entries resolved as TV `Episode` or `Movie` items are processed. Other entry types are ignored and duplicate item IDs are processed once.
 - Per-user/item failures are logged and do not stop the rest of the run. No direct database access or global item metadata updates are used.

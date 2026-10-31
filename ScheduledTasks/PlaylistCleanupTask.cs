@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Globalization;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Plugin.PlaylistCleaner.Configuration;
+using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Playlists;
@@ -36,7 +38,7 @@ public sealed class PlaylistCleanupTask : IScheduledTask
 
     public string Key => "Jellyfin.Plugin.PlaylistCleaner.Cleanup";
 
-    public string Description => "Marks the selected playlist's TV episodes watched and clears resume positions for Jellyfin users.";
+    public string Description => "Marks the selected playlist's TV episodes and movies watched and clears resume positions for Jellyfin users.";
 
     public string Category => "Library";
 
@@ -74,8 +76,8 @@ public sealed class PlaylistCleanupTask : IScheduledTask
         var stopwatch = Stopwatch.StartNew();
         var startedUtc = DateTimeOffset.UtcNow;
         var usersProcessed = 0;
-        var episodesProcessed = 0;
-        var uniqueEpisodeCount = 0;
+        var itemsProcessed = 0;
+        var uniqueItemCount = 0;
         var errors = 0;
 
         try
@@ -97,14 +99,14 @@ public sealed class PlaylistCleanupTask : IScheduledTask
             if (configuration is null || configuration.SelectedPlaylistId is null)
             {
                 _logger.LogInformation("No playlist is selected; cleanup was skipped.");
-                CompleteRun("Skipped: no playlist selected", startedUtc, stopwatch.Elapsed, usersProcessed, episodesProcessed, uniqueEpisodeCount, errors, false);
+                CompleteRun("Skipped: no playlist selected", startedUtc, stopwatch.Elapsed, usersProcessed, itemsProcessed, uniqueItemCount, errors, false);
                 return;
             }
 
             if (!configuration.MarkEpisodesWatched && !configuration.ClearPlaybackProgress)
             {
                 _logger.LogInformation("Both playback operations are disabled; cleanup was skipped.");
-                CompleteRun("Skipped: no operations enabled", startedUtc, stopwatch.Elapsed, usersProcessed, episodesProcessed, uniqueEpisodeCount, errors, false);
+                CompleteRun("Skipped: no operations enabled", startedUtc, stopwatch.Elapsed, usersProcessed, itemsProcessed, uniqueItemCount, errors, false);
                 return;
             }
 
@@ -137,23 +139,23 @@ public sealed class PlaylistCleanupTask : IScheduledTask
             {
                 errors++;
                 _logger.LogError("Selected playlist {PlaylistId} is missing or inaccessible to all users; no playback data was changed.", configuration.SelectedPlaylistId);
-                CompleteRun("Failed: selected playlist missing or inaccessible", startedUtc, stopwatch.Elapsed, usersProcessed, episodesProcessed, uniqueEpisodeCount, errors, false);
+                CompleteRun("Failed: selected playlist missing or inaccessible", startedUtc, stopwatch.Elapsed, usersProcessed, itemsProcessed, uniqueItemCount, errors, false);
                 return;
             }
 
-            var episodes = playlist.GetManageableItems()
+            var mediaItems = playlist.GetManageableItems()
                 .Select(entry => entry.Item2)
-                .OfType<Episode>()
-                .DistinctBy(episode => episode.Id)
+                .Where(item => item is Episode or Movie)
+                .DistinctBy(item => item.Id)
                 .ToArray();
 
-            uniqueEpisodeCount = episodes.Length;
+            uniqueItemCount = mediaItems.Length;
             var users = usersWithAccess.ToArray();
 
             _logger.LogInformation("Playlist: {PlaylistName}", playlist.Name);
-            _logger.LogInformation("Found {EpisodeCount} unique TV episodes and {UserCount} users with playlist access.", episodes.Length, users.Length);
+            _logger.LogInformation("Found {ItemCount} unique TV episodes and movies and {UserCount} users with playlist access.", mediaItems.Length, users.Length);
 
-            var totalOperations = Math.Max(1, episodes.Length * users.Length);
+            var totalOperations = Math.Max(1, mediaItems.Length * users.Length);
             var completedOperations = 0;
 
             foreach (var user in users)
@@ -164,13 +166,13 @@ public sealed class PlaylistCleanupTask : IScheduledTask
                 {
                     _logger.LogInformation("Processing user: {UserName}", user.Username);
 
-                    foreach (var episode in episodes)
+                    foreach (var item in mediaItems)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         try
                         {
-                            ProcessEpisode(user, episode, configuration, cancellationToken);
-                            episodesProcessed++;
+                            ProcessItem(user, item, configuration, cancellationToken);
+                            itemsProcessed++;
                         }
                         catch (OperationCanceledException)
                         {
@@ -179,7 +181,7 @@ public sealed class PlaylistCleanupTask : IScheduledTask
                         catch (Exception exception)
                         {
                             errors++;
-                            _logger.LogError(exception, "Failed to update episode {EpisodeId} ({EpisodeName}) for user {UserName}.", episode.Id, episode.Name, user.Username);
+                            _logger.LogError(exception, "Failed to update media item {ItemId} ({ItemName}) for user {UserName}.", item.Id, item.Name, user.Username);
                         }
 
                         completedOperations++;
@@ -199,12 +201,12 @@ public sealed class PlaylistCleanupTask : IScheduledTask
 
             stopwatch.Stop();
             var status = errors == 0 ? "Completed" : "Completed with errors";
-            CompleteRun(status, startedUtc, stopwatch.Elapsed, usersProcessed, episodesProcessed, uniqueEpisodeCount, errors, errors == 0);
+            CompleteRun(status, startedUtc, stopwatch.Elapsed, usersProcessed, itemsProcessed, uniqueItemCount, errors, errors == 0);
         }
         catch (OperationCanceledException)
         {
             stopwatch.Stop();
-            CompleteRun("Cancelled", startedUtc, stopwatch.Elapsed, usersProcessed, episodesProcessed, uniqueEpisodeCount, errors, false);
+            CompleteRun("Cancelled", startedUtc, stopwatch.Elapsed, usersProcessed, itemsProcessed, uniqueItemCount, errors, false);
             throw;
         }
         catch (Exception exception)
@@ -212,7 +214,7 @@ public sealed class PlaylistCleanupTask : IScheduledTask
             stopwatch.Stop();
             errors++;
             _logger.LogError(exception, "Playlist cleanup failed after {Duration}.", stopwatch.Elapsed);
-            CompleteRun("Failed", startedUtc, stopwatch.Elapsed, usersProcessed, episodesProcessed, uniqueEpisodeCount, errors, false);
+            CompleteRun("Failed", startedUtc, stopwatch.Elapsed, usersProcessed, itemsProcessed, uniqueItemCount, errors, false);
             throw;
         }
         finally
@@ -221,11 +223,11 @@ public sealed class PlaylistCleanupTask : IScheduledTask
         }
     }
 
-    private void ProcessEpisode(User user, Episode episode, PluginConfiguration configuration, CancellationToken cancellationToken)
+    private void ProcessItem(User user, BaseItem item, PluginConfiguration configuration, CancellationToken cancellationToken)
     {
         if (configuration.MarkEpisodesWatched)
         {
-            episode.MarkPlayed(user, null, configuration.ClearPlaybackProgress);
+            item.MarkPlayed(user, null, configuration.ClearPlaybackProgress);
             return;
         }
 
@@ -234,14 +236,14 @@ public sealed class PlaylistCleanupTask : IScheduledTask
             return;
         }
 
-        var userData = _userDataManager.GetUserData(user, episode);
+        var userData = _userDataManager.GetUserData(user, item);
         if (userData is null || userData.PlaybackPositionTicks == 0)
         {
             return;
         }
 
         userData.PlaybackPositionTicks = 0;
-        _userDataManager.SaveUserData(user, episode, userData, UserDataSaveReason.UpdateUserData, cancellationToken);
+        _userDataManager.SaveUserData(user, item, userData, UserDataSaveReason.UpdateUserData, cancellationToken);
     }
 
     private void CompleteRun(
@@ -249,8 +251,8 @@ public sealed class PlaylistCleanupTask : IScheduledTask
         DateTimeOffset startedUtc,
         TimeSpan duration,
         int usersProcessed,
-        int episodesProcessed,
-        int uniqueEpisodeCount,
+        int itemsProcessed,
+        int uniqueItemCount,
         int errors,
         bool successful)
     {
@@ -261,8 +263,8 @@ public sealed class PlaylistCleanupTask : IScheduledTask
             configuration.LastExecutionStartedUtc = startedUtc.ToString("O", CultureInfo.InvariantCulture);
             configuration.LastExecutionCompletedUtc = completedUtc.ToString("O", CultureInfo.InvariantCulture);
             configuration.LastUsersProcessed = usersProcessed;
-            configuration.LastEpisodesProcessed = episodesProcessed;
-            configuration.LastUniqueEpisodesFound = uniqueEpisodeCount;
+            configuration.LastEpisodesProcessed = itemsProcessed;
+            configuration.LastUniqueEpisodesFound = uniqueItemCount;
             configuration.LastErrors = errors;
             if (successful)
             {
@@ -271,12 +273,12 @@ public sealed class PlaylistCleanupTask : IScheduledTask
         });
 
         _logger.LogInformation(
-            "Cleanup finished with status {Status} in {Duration}. Users processed: {UserCount}. Episodes processed: {EpisodeCount}. Unique episodes: {UniqueEpisodeCount}. Errors: {ErrorCount}.",
+            "Cleanup finished with status {Status} in {Duration}. Users processed: {UserCount}. Media items processed: {ItemCount}. Unique media items: {UniqueItemCount}. Errors: {ErrorCount}.",
             status,
             duration,
             usersProcessed,
-            episodesProcessed,
-            uniqueEpisodeCount,
+            itemsProcessed,
+            uniqueItemCount,
             errors);
     }
 
