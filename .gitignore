@@ -4,3 +4,4 @@ obj/
 .vscode/.ropeproject/
 *.user
 *.suo
+.DS_Store
