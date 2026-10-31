@@ -18,17 +18,20 @@ public sealed class PlaylistCleanupTask : IScheduledTask
     private static readonly SemaphoreSlim ExecutionGate = new(1, 1);
 
     private readonly IPlaylistManager _playlistManager;
+    private readonly ILibraryManager _libraryManager;
     private readonly IUserDataManager _userDataManager;
     private readonly IUserManager _userManager;
     private readonly ILogger<PlaylistCleanupTask> _logger;
 
     public PlaylistCleanupTask(
         IPlaylistManager playlistManager,
+        ILibraryManager libraryManager,
         IUserDataManager userDataManager,
         IUserManager userManager,
         ILogger<PlaylistCleanupTask> logger)
     {
         _playlistManager = playlistManager;
+        _libraryManager = libraryManager;
         _userDataManager = userDataManager;
         _userManager = userManager;
         _logger = logger;
@@ -171,8 +174,12 @@ public sealed class PlaylistCleanupTask : IScheduledTask
                         cancellationToken.ThrowIfCancellationRequested();
                         try
                         {
-                            ProcessItem(user, item, configuration, cancellationToken);
-                            itemsProcessed++;
+                            var accessibleItem = _libraryManager.GetItemById<BaseItem>(item.Id, user);
+                            if (accessibleItem is not null)
+                            {
+                                ProcessItem(user, accessibleItem, configuration, cancellationToken);
+                                itemsProcessed++;
+                            }
                         }
                         catch (OperationCanceledException)
                         {
