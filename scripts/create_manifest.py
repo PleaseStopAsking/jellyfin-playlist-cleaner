@@ -40,7 +40,7 @@ def main() -> None:
         "changelog": args.changelog_url or "See the GitHub release notes.",
         "targetAbi": "12.4.0.0",
         "sourceUrl": args.source_url,
-        "checksum": hashlib.md5(package_bytes).hexdigest(),
+        "checksum": hashlib.md5(package_bytes, usedforsecurity=False).hexdigest(),
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
     }
     manifest[0]["versions"] = [
